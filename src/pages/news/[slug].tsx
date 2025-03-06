@@ -28,16 +28,34 @@ const StyledPaper = styled(Paper)(({ theme }) => ({
     },
 }));
 
-const NewsDetail: FC = () => {
+interface NewsDetailProps {
+    initialNewsItem?: News;
+}
+
+const NewsDetail: FC<NewsDetailProps> = ({ initialNewsItem }) => {
     const router = useRouter();
     const { slug } = router.query;
     const { t } = useTranslation('common');
     const { locale } = router;
-    const [newsItem, setNewsItem] = useState<News | null>(null);
+    const [newsItem, setNewsItem] = useState<News | null>(initialNewsItem || null);
     const [currentLocale, setCurrentLocale] = useState<string | undefined>(locale);
-    const [loading, setLoading] = useState<boolean>(true);
+    const [loading, setLoading] = useState<boolean>(!initialNewsItem);
 
     useEffect(() => {
+        // If we already have the news item from props and not changing locale, no need to fetch
+        if (initialNewsItem && currentLocale === locale) {
+            console.log('Using initialNewsItem from props:', initialNewsItem.title);
+            setNewsItem(initialNewsItem);
+            setLoading(false);
+            return;
+        }
+
+        // If the page is in fallback mode and slug is not yet available, don't do anything
+        if (router.isFallback || !slug) {
+            console.log('In fallback mode or slug not available yet:', { isFallback: router.isFallback, slug });
+            return;
+        }
+
         // Check if locale has changed
         if (currentLocale !== locale) {
             console.log(`Locale changed from ${currentLocale} to ${locale}`);
@@ -46,14 +64,18 @@ const NewsDetail: FC = () => {
         
         const loadNews = async () => {
             setLoading(true);
-            console.log(`Loading news data with locale: ${locale}`);
+            console.log(`Loading news data with locale: ${locale}, slug: ${slug}`);
             try {
                 const data = await loadNewsData(locale || 'en'); // Fetch data based on the current locale
+                console.log(`Loaded ${data.length} news items`);
+                
                 const item = data.find((item) => item.slug === slug);
+                console.log(`Found news item for slug ${slug}:`, item ? 'Yes' : 'No');
+                
                 setNewsItem(item || null);
                 
-                // If item not found and we're not in fallback mode, redirect to news page
-                if (!item && !router.isFallback) {
+                // If item not found, redirect to news page
+                if (!item) {
                     console.log(`News item with slug ${slug} not found, redirecting...`);
                     router.push('/news');
                 }
@@ -64,13 +86,28 @@ const NewsDetail: FC = () => {
             }
         };
 
-        if (slug) {
-            loadNews();
-        }
-    }, [locale, slug, currentLocale, router]); // Added router to dependencies
+        loadNews();
+    }, [locale, slug, currentLocale, router, initialNewsItem]); // Added initialNewsItem to dependencies
 
-    // Show loading state when in fallback mode or loading data
-    if (router.isFallback || loading) {
+    // Show loading state when in fallback mode
+    if (router.isFallback) {
+        console.log('Rendering fallback state');
+        return (
+            <MainLayout>
+                <Container>
+                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+                        <Typography variant="h4" align="center">
+                            {t('common.loading', 'جاري التحميل...')}
+                        </Typography>
+                    </Box>
+                </Container>
+            </MainLayout>
+        );
+    }
+
+    // Show loading state when loading data but not in fallback mode
+    if (loading && !router.isFallback) {
+        console.log('Rendering loading state (not fallback)');
         return (
             <MainLayout>
                 <Container>
@@ -85,6 +122,7 @@ const NewsDetail: FC = () => {
     }
 
     if (!newsItem) {
+        console.log('Rendering not found state');
         return (
             <MainLayout>
                 <Container>
@@ -95,6 +133,8 @@ const NewsDetail: FC = () => {
             </MainLayout>
         );
     }
+
+    console.log('Rendering news item:', newsItem.title);
 
     return (
         <MainLayout>
@@ -196,6 +236,8 @@ export const getStaticPaths: GetStaticPaths = async () => {
         const response = await fetch('https://raw.githubusercontent.com/RamezHany/IGCCe-tr/refs/heads/main/news.json');
         const data = await response.json();
 
+        console.log(`Generating static paths for ${data.news.length} news items`);
+
         // Create paths for both Arabic and English locales with proper typing
         const paths: { params: { slug: string }; locale: string }[] = [];
         
@@ -213,15 +255,17 @@ export const getStaticPaths: GetStaticPaths = async () => {
             });
         });
 
+        console.log(`Generated ${paths.length} static paths`);
+
         return {
             paths,
-            fallback: true, // Changed from 'blocking' to true for better UX with loading states
+            fallback: false, // Changed back to false to ensure all paths are pre-rendered
         };
     } catch (error) {
         console.error('Error generating static paths:', error);
         return {
             paths: [],
-            fallback: true,
+            fallback: false,
         };
     }
 };
@@ -233,20 +277,24 @@ export const getStaticProps: GetStaticProps = async ({ locale, params }) => {
         const data = await response.json();
         
         const slug = params?.slug as string;
+        console.log(`getStaticProps for slug: ${slug}, locale: ${locale}`);
+        
         const newsItem = data.news.find((item: any) => item.slug === slug);
         
         // If the news item doesn't exist, return notFound
         if (!newsItem) {
+            console.log(`News item with slug ${slug} not found`);
             return {
                 notFound: true,
             };
         }
         
+        console.log(`Found news item for slug ${slug}: ${newsItem.title}`);
+        
         return {
             props: {
                 ...(await serverSideTranslations(locale || 'ar', ['common'])),
-                // We could pass the news item here, but we're fetching it client-side
-                // to ensure we always have the latest data
+                initialNewsItem: newsItem, // Pass the news item directly to avoid client-side fetching
             },
             // Revalidate every hour to check for new content
             revalidate: 300,
