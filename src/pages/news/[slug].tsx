@@ -249,7 +249,7 @@ export const getStaticProps: GetStaticProps = async ({ locale, params }) => {
                 // to ensure we always have the latest data
             },
             // Revalidate every hour to check for new content
-            revalidate: 3600,
+            revalidate: 300,
         };
     } catch (error) {
         console.error('Error in getStaticProps:', error);
